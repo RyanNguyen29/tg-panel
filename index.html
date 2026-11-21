@@ -1,0 +1,239 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Bảng điều khiển</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<style>
+  /* Telegram sets the --tg-theme-* variables; the fallbacks are for a normal browser. */
+  :root {
+    --bg: var(--tg-theme-bg-color, #ffffff);
+    --bg2: var(--tg-theme-secondary-bg-color, #f1f2f6);
+    --text: var(--tg-theme-text-color, #111111);
+    --hint: var(--tg-theme-hint-color, #8a8f98);
+    --accent: var(--tg-theme-button-color, #2481cc);
+    --accent-text: var(--tg-theme-button-text-color, #ffffff);
+    --section: var(--tg-theme-section-bg-color, var(--bg));
+    --header: var(--tg-theme-section-header-text-color, var(--hint));
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; background: var(--bg2); color: var(--text);
+    font: 15px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  main { padding: 12px 16px 96px; max-width: 640px; margin: 0 auto; }
+  h2 { font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: .03em;
+    color: var(--header); margin: 18px 4px 8px; }
+  .card { background: var(--section); border-radius: 12px; overflow: hidden; }
+  .check { display: flex; align-items: center; gap: 12px; width: 100%; padding: 11px 14px;
+    border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+  .check + .check { border-top: 1px solid var(--bg2); }
+  .check .icon { font-size: 20px; width: 26px; text-align: center; }
+  .check .name { font-weight: 600; }
+  .check .desc { color: var(--hint); font-size: 13px; }
+  .check .tick { margin-left: auto; width: 20px; height: 20px; border-radius: 50%;
+    border: 2px solid var(--hint); flex: none; }
+  .check[aria-checked="true"] .tick { border: 6px solid var(--accent); }
+  .row { display: flex; align-items: center; justify-content: space-between; padding: 11px 14px; }
+  .switch { position: relative; width: 46px; height: 28px; border-radius: 14px; border: 0;
+    background: var(--hint); cursor: pointer; transition: background .15s; flex: none; }
+  .switch::after { content: ""; position: absolute; top: 3px; left: 3px; width: 22px; height: 22px;
+    border-radius: 50%; background: #fff; transition: transform .15s; }
+  .switch[aria-checked="true"] { background: var(--accent); }
+  .switch[aria-checked="true"]::after { transform: translateX(18px); }
+  .groups, .servers { display: flex; flex-wrap: wrap; gap: 8px; padding: 0 14px 12px; }
+  .groups { padding-top: 2px; }
+  .chip { border: 1px solid var(--hint); background: none; color: inherit; font: inherit;
+    border-radius: 16px; padding: 5px 12px; cursor: pointer; min-width: 52px; }
+  .chip[aria-pressed="true"] { background: var(--accent); border-color: var(--accent);
+    color: var(--accent-text); }
+  .groups .chip { font-size: 13px; padding: 3px 10px; border-style: dashed; }
+  .disabled { opacity: .4; pointer-events: none; }
+  .note { color: var(--hint); font-size: 13px; margin: 8px 4px 0; }
+  .warn { background: #fff3cd; color: #664d03; border-radius: 12px; padding: 12px 14px; margin-top: 12px; }
+  #fallback { position: fixed; left: 16px; right: 16px; bottom: 16px; padding: 14px; border: 0;
+    border-radius: 12px; background: var(--accent); color: var(--accent-text); font: inherit;
+    font-weight: 600; cursor: pointer; display: none; }
+  #fallback:disabled { opacity: .5; }
+</style>
+</head>
+<body>
+<main>
+  <div id="warning" class="warn" hidden></div>
+
+  <h2>Kiểm tra</h2>
+  <div class="card" id="checks" role="radiogroup" aria-label="Kiểm tra"></div>
+
+  <h2>Server</h2>
+  <div class="card">
+    <div class="row">
+      <span>Tất cả server</span>
+      <button class="switch" id="all" role="switch" aria-checked="true" aria-label="Tất cả server"></button>
+    </div>
+    <div id="picker" class="disabled">
+      <div class="groups" id="groups"></div>
+      <div class="servers" id="servers"></div>
+    </div>
+  </div>
+  <p class="note" id="note"></p>
+  <p class="note">Chỉ chạy các lệnh kiểm tra (chỉ đọc). Kết quả gửi về chat với bot.</p>
+</main>
+<button id="fallback" type="button"></button>
+
+<script>
+(function () {
+  "use strict";
+  var tg = window.Telegram && window.Telegram.WebApp;
+  // Outside Telegram the SDK still loads but reports platform "unknown".
+  var inTelegram = !!(tg && tg.platform && tg.platform !== "unknown");
+  var LABELS = {
+    disk:    ["💾", "Đĩa", "Dung lượng ổ đĩa"],
+    cron:    ["⏰", "Cron", "Task Baota có chạy đúng lịch"],
+    system:  ["📈", "Hệ thống", "Tải, CPU, băng thông"],
+    traffic: ["🛡️", "Traffic", "Tên miền bị tấn công / bị cào"],
+    domains: ["🌐", "Tên miền", "Thử từ node Trung Quốc"],
+    phimmoi: ["🎬", "Phim mới", "Mở thử link phim thêm trong ngày"],
+    jump:    ["↪️", "Jump", "Tên miền đang bật jump"],
+    all:     ["✅", "Tất cả", "Mọi check, thiết lập mặc định"]
+  };
+  var ORDER = ["disk", "cron", "system", "traffic", "domains", "phimmoi", "jump"];
+
+  // The bot puts the names in the fragment: #c=disk,cron&s=LF1,LF2
+  var params = new URLSearchParams(location.hash.slice(1));
+  function list(key) {
+    return (params.get(key) || "").split(",").map(function (v) { return v.trim(); })
+      .filter(function (v) { return /^[\w.-]{1,40}$/.test(v); });
+  }
+  var checks = list("c").sort(function (a, b) {
+    var ia = ORDER.indexOf(a), ib = ORDER.indexOf(b);
+    return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib) || a.localeCompare(b);
+  });
+  if (checks.length) checks.push("all");
+  var servers = list("s");
+
+  var state = { check: checks[0] || null, all: true, picked: new Set() };
+  var el = function (id) { return document.getElementById(id); };
+
+  function make(tag, cls, text) {
+    var node = document.createElement(tag);
+    if (cls) node.className = cls;
+    if (text != null) node.textContent = text;
+    return node;
+  }
+  function haptic() {
+    try { tg && tg.HapticFeedback && tg.HapticFeedback.selectionChanged(); } catch (e) {}
+  }
+
+  // Checks
+  checks.forEach(function (name) {
+    var info = LABELS[name] || ["🔎", name, ""];
+    var button = make("button", "check");
+    button.type = "button";
+    button.setAttribute("role", "radio");
+    button.dataset.name = name;
+    button.appendChild(make("span", "icon", info[0]));
+    var text = make("span");
+    text.appendChild(make("div", "name", info[1]));
+    if (info[2]) text.appendChild(make("div", "desc", info[2]));
+    button.appendChild(text);
+    button.appendChild(make("span", "tick"));
+    button.addEventListener("click", function () { state.check = name; haptic(); render(); });
+    el("checks").appendChild(button);
+  });
+
+  // Servers, plus one quick button per name prefix (LF, WZ, KB...)
+  var groups = {};
+  servers.forEach(function (name) {
+    var prefix = (name.match(/^[A-Za-z]+/) || [""])[0].toUpperCase();
+    if (prefix) (groups[prefix] = groups[prefix] || []).push(name);
+    var chip = make("button", "chip", name);
+    chip.type = "button";
+    chip.dataset.name = name;
+    chip.addEventListener("click", function () {
+      state.picked.has(name) ? state.picked.delete(name) : state.picked.add(name);
+      haptic(); render();
+    });
+    el("servers").appendChild(chip);
+  });
+  Object.keys(groups).filter(function (p) { return groups[p].length > 1; }).sort()
+    .forEach(function (prefix) {
+      var chip = make("button", "chip", prefix + "*");
+      chip.type = "button";
+      chip.addEventListener("click", function () {
+        var members = groups[prefix];
+        var allOn = members.every(function (n) { return state.picked.has(n); });
+        members.forEach(function (n) { allOn ? state.picked.delete(n) : state.picked.add(n); });
+        haptic(); render();
+      });
+      el("groups").appendChild(chip);
+    });
+  var clear = make("button", "chip", "Bỏ chọn");
+  clear.type = "button";
+  clear.addEventListener("click", function () { state.picked.clear(); haptic(); render(); });
+  el("groups").appendChild(clear);
+
+  el("all").addEventListener("click", function () { state.all = !state.all; haptic(); render(); });
+
+  function chosen() {
+    return state.all ? [] : servers.filter(function (n) { return state.picked.has(n); });
+  }
+  function ready() { return state.check && (state.all || state.picked.size > 0); }
+  function caption() {
+    if (!state.check) return "Chọn một kiểm tra";
+    var label = (LABELS[state.check] || [0, state.check])[1];
+    if (state.all) return "Chạy " + label + " · tất cả server";
+    if (!state.picked.size) return "Chọn ít nhất 1 server";
+    return "Chạy " + label + " · " + state.picked.size + " server";
+  }
+
+  function render() {
+    Array.prototype.forEach.call(el("checks").children, function (b) {
+      b.setAttribute("aria-checked", String(b.dataset.name === state.check));
+    });
+    el("all").setAttribute("aria-checked", String(state.all));
+    el("picker").classList.toggle("disabled", state.all);
+    Array.prototype.forEach.call(el("servers").children, function (c) {
+      c.setAttribute("aria-pressed", String(state.picked.has(c.dataset.name)));
+    });
+    el("note").textContent = state.all
+      ? "Như khi chạy không có -s: bỏ qua các server bị loại trong srvcheck.toml."
+      : (state.picked.size ? "Đã chọn: " + chosen().join(", ") : "Chưa chọn server nào.");
+
+    if (inTelegram && tg.MainButton) {
+      tg.MainButton.setText(caption());
+      ready() ? tg.MainButton.enable() : tg.MainButton.disable();
+      tg.MainButton.show();
+    } else {
+      el("fallback").textContent = caption();
+      el("fallback").disabled = !ready();
+      el("fallback").style.display = "block";
+    }
+  }
+
+  function submit() {
+    if (!ready()) return;
+    var data = JSON.stringify({ check: state.check, servers: chosen() });
+    try {
+      tg.sendData(data);   // closes the Mini App; the bot receives web_app_data
+    } catch (e) {
+      warn("Không gửi được về bot. Hãy mở bảng này bằng nút \"🧰 Bảng điều khiển\" trong chat với bot.");
+    }
+  }
+  function warn(text) { el("warning").textContent = text; el("warning").hidden = false; }
+
+  if (tg) {
+    tg.ready();
+    tg.expand();
+    if (tg.MainButton) tg.MainButton.onClick(submit);
+  }
+  el("fallback").addEventListener("click", submit);
+
+  if (!checks.length || !servers.length) {
+    warn("Không có danh sách kiểm tra hoặc server. Hãy mở bảng này bằng nút \"🧰 Bảng điều khiển\" trong chat với bot.");
+  } else if (!inTelegram) {
+    warn("Trang này chỉ chạy trong Telegram, từ nút \"🧰 Bảng điều khiển\" của bot.");
+  }
+  render();
+})();
+</script>
+</body>
+</html>
